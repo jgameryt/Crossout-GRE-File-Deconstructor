@@ -1,5 +1,5 @@
 use egui::{self, ColorImage, ComboBox, TextureHandle, Vec2};
-use sokol::{gfx as sg, gl as sgl};
+use std::collections::BTreeSet;
 use crate::mdl::{MdlChunk, group_models, ModelGroup};
 
 pub struct ModelViewer {
@@ -11,57 +11,25 @@ pub struct ModelViewer {
 
     // Render state
     tex: Option<TextureHandle>,
-    pixels: Vec<u8>,
+    buf: ColorImage,
     yaw: f32,
     pitch: f32,
     dist: f32,
-    image: sg::Image,
-    pass: sg::Pass,
-    pass_action: sg::PassAction,
 }
 
 impl ModelViewer {
     pub fn new(chunks: Vec<MdlChunk>) -> Self {
         let groups = group_models(&chunks);
-        sg::setup(&sg::Desc::default());
-        sgl::setup(&sgl::Desc::default());
-        let color_img = sg::make_image(&sg::ImageDesc {
-            render_target: true,
-            width: 512,
-            height: 512,
-            pixel_format: sg::PixelFormat::RGBA8,
-            ..Default::default()
-        });
-        let depth_img = sg::make_image(&sg::ImageDesc {
-            render_target: true,
-            width: 512,
-            height: 512,
-            pixel_format: sg::PixelFormat::DEPTH,
-            ..Default::default()
-        });
-        let pass = sg::make_pass(&sg::PassDesc {
-            color_attachments: [
-                sg::PassAttachment { image: color_img, ..Default::default() },
-                sg::PassAttachment::default(),
-                sg::PassAttachment::default(),
-                sg::PassAttachment::default(),
-            ],
-            depth_stencil_attachment: sg::PassAttachment { image: depth_img, ..Default::default() },
-            ..Default::default()
-        });
         Self {
             chunks,
             groups,
             selected_group: 0,
             selected_lod: 0,
             tex: None,
-            pixels: vec![0; 512 * 512 * 4],
+            buf: ColorImage::filled([512, 512], egui::Color32::BLACK),
             yaw: 0.5,
             pitch: 0.2,
             dist: 3.0,
-            image: color_img,
-            pass,
-            pass_action: sg::PassAction::default(),
         }
     }
 
@@ -88,11 +56,10 @@ impl ModelViewer {
         let size = Vec2::splat(512.0);
         self.handle_input(ui);
         self.render_current();
-        let img = ColorImage::from_rgba_unmultiplied([512, 512], &self.pixels);
         let tex = self
             .tex
-            .get_or_insert_with(|| ui.ctx().load_texture("mdl_view", img.clone(), egui::TextureOptions::LINEAR));
-        tex.set(img, egui::TextureOptions::LINEAR);
+            .get_or_insert_with(|| ui.ctx().load_texture("mdl_view", self.buf.clone(), egui::TextureOptions::LINEAR));
+        tex.set(self.buf.clone(), egui::TextureOptions::LINEAR);
         ui.image((tex.id(), size));
     }
 
@@ -116,29 +83,67 @@ impl ModelViewer {
             let g = &self.groups[self.selected_group];
             &self.chunks[g.lods[self.selected_lod]]
         };
-        sg::begin_pass(self.pass, &self.pass_action);
-        sg::apply_viewport(0, 0, 512, 512, true);
-        sgl::defaults();
-        sgl::matrix_mode_projection();
-        sgl::load_identity();
-        sgl::perspective(60.0, 1.0, 0.01, 100.0);
-        sgl::matrix_mode_modelview();
-        sgl::load_identity();
-        sgl::translate(0.0, 0.0, -self.dist * 2.0 - 1.0);
-        sgl::rotate(self.pitch, 1.0, 0.0, 0.0);
-        sgl::rotate(self.yaw, 0.0, 1.0, 0.0);
-        sgl::begin_triangles();
+        let w = self.buf.size[0] as i32;
+        let h = self.buf.size[1] as i32;
+        self.buf.pixels.fill(egui::Color32::from_rgb(15, 15, 20));
+        let mut edges: BTreeSet<(u32, u32)> = BTreeSet::new();
         for tri in &ch.indices {
-            for &idx in tri {
-                let v = ch.vertices[idx as usize];
-                sgl::v3f(v[0], v[1], v[2]);
+            let (a, b, c) = (tri[0], tri[1], tri[2]);
+            let e = |x: u32, y: u32| if x < y { (x, y) } else { (y, x) };
+            edges.insert(e(a, b));
+            edges.insert(e(b, c));
+            edges.insert(e(c, a));
+        }
+        let (sy, cy) = self.yaw.sin_cos();
+        let (sp, cp) = self.pitch.sin_cos();
+        let mut screen: Vec<[i32; 2]> = Vec::with_capacity(ch.vertices.len());
+        for &p in &ch.vertices {
+            let mut x = p[0] * cy + p[2] * sy;
+            let mut z = -p[0] * sy + p[2] * cy;
+            let mut y = p[1] * cp - z * sp;
+            z = p[1] * sp + z * cp;
+            let zc = z + self.dist * 2.0 + 1.0;
+            let f = 300.0 / zc.max(0.01);
+            let sx = (w / 2) as f32 + x * f;
+            let sy2 = (h / 2) as f32 - y * f;
+            screen.push([sx as i32, sy2 as i32]);
+        }
+        for (a, b) in edges {
+            let pa = screen[a as usize];
+            let pb = screen[b as usize];
+            self.line(pa[0], pa[1], pb[0], pb[1], egui::Color32::WHITE);
+        }
+    }
+
+    fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: egui::Color32) {
+        let w = self.buf.size[0] as i32;
+        let h = self.buf.size[1] as i32;
+        let mut x0 = x0;
+        let mut y0 = y0;
+        let mut x1 = x1;
+        let mut y1 = y1;
+        let dx = (x1 - x0).abs();
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let dy = -(y1 - y0).abs();
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let mut err = dx + dy;
+        loop {
+            if x0 >= 0 && x0 < w && y0 >= 0 && y0 < h {
+                self.buf[(x0 as usize, y0 as usize)] = color;
+            }
+            if x0 == x1 && y0 == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x0 += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y0 += sy;
             }
         }
-        sgl::end();
-        sgl::draw();
-        sg::end_pass();
-        sg::commit();
-        sg::read_pixels(&self.image, &mut self.pixels);
     }
 }
 
