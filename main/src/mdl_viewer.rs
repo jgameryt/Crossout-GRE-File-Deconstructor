@@ -41,15 +41,30 @@ impl ModelViewer {
             .selected_text(format!("Model {}", self.selected_group))
             .show_ui(ui, |ui| {
                 for (idx, _g) in self.groups.iter().enumerate() {
-                    ui.selectable_value(&mut self.selected_group, idx, format!("Model {}", idx));
+                    if ui
+                        .selectable_value(&mut self.selected_group, idx, format!("Model {}", idx))
+                        .clicked()
+                    {
+                        self.selected_lod = 0;
+                        ui.ctx().request_repaint();
+                    }
                 }
             });
+        // Clamp selected_lod to existing range
         let g = &self.groups[self.selected_group];
+        if self.selected_lod >= g.lods.len() {
+            self.selected_lod = 0;
+        }
         ComboBox::from_label("LOD")
             .selected_text(format!("LOD {}", self.selected_lod))
             .show_ui(ui, |ui| {
                 for (lod_rank, _) in g.lods.iter().enumerate() {
-                    ui.selectable_value(&mut self.selected_lod, lod_rank, format!("LOD {}", lod_rank));
+                    if ui
+                        .selectable_value(&mut self.selected_lod, lod_rank, format!("LOD {}", lod_rank))
+                        .clicked()
+                    {
+                        ui.ctx().request_repaint();
+                    }
                 }
             });
 

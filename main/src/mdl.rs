@@ -115,7 +115,7 @@ pub fn parse_all_chunks(bytes: &[u8]) -> Result<Vec<MdlChunk>> {
                     vertices, indices
                 });
                 // Jump near end of this chunk to continue scanning
-                off = iend;
+                off = (iend + 0xF) & !0xF; // align to 16-byte boundary
                 continue;
             }
         }
