@@ -315,6 +315,8 @@ impl eframe::App for AppState {
 
         if let Some(viewer) = &mut self.mdl_viewer {
             egui::Area::new(egui::Id::new("mdl_viewer"))
+                .interactable(true)
+                .order(egui::Order::Foreground)
                 .anchor(Align2::RIGHT_BOTTOM, [0.0, 0.0])
                 .show(ctx, |ui| {
                     egui::Frame::window(ui.style()).show(ui, |ui| {
