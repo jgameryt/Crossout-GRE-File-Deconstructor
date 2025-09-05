@@ -1,5 +1,5 @@
 use egui::{self, ColorImage, ComboBox, TextureHandle, Vec2};
-use sokol::{gfx as sg, gl as sgl, glue};
+use sokol::{gfx as sg, gl as sgl};
 use crate::mdl::{MdlChunk, group_models, ModelGroup};
 
 pub struct ModelViewer {
@@ -24,7 +24,7 @@ impl ModelViewer {
     pub fn new(chunks: Vec<MdlChunk>) -> Self {
         let groups = group_models(&chunks);
         sg::setup(&sg::Desc::default());
-        glue::setup();
+        sgl::setup(&sgl::Desc::default());
         let color_img = sg::make_image(&sg::ImageDesc {
             render_target: true,
             width: 512,
