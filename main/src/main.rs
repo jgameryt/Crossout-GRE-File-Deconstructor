@@ -4,6 +4,10 @@ use anyhow::{Context, Result};
 use eframe::egui::{self, Button};
 use egui::debug_text::print;
 use rfd::FileDialog;
+mod mdl;
+mod mdl_viewer;
+use mdl_viewer::ModelViewer;
+use egui::Align2;
 
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
 
@@ -140,6 +144,19 @@ impl GrpFile {
         }
         Ok(out_path)
     }
+
+    fn read_entry(&self, entry: &GrpEntry) -> Result<Vec<u8>> {
+        let bytes = &self.file_data[entry.start as usize .. (entry.start + entry.size) as usize];
+        match entry.compression {
+            Compression::Zstd => {
+                let mut dec = zstd::stream::read::Decoder::new(Cursor::new(bytes))?;
+                let mut out = Vec::new();
+                dec.read_to_end(&mut out)?;
+                Ok(out)
+            }
+            Compression::Raw => Ok(bytes.to_vec()),
+        }
+    }
 }
 //Handles getting little-endian 4byte values
 fn get_u32(data: &[u8], off: usize) -> Result<u32> {
@@ -161,8 +178,10 @@ fn read_cstr(buf: &[u8], off: usize) -> Result<String> {
 struct AppState {
     pack: Option<GrpFile>,
     root: TreeNode,
-    selected: Option<usize>, 
+    selected: Option<usize>,
     message: String,
+    mdl_viewer: Option<ModelViewer>,
+    mdl_viewer_idx: Option<usize>,
 }
 
 #[derive(Default)]
@@ -268,6 +287,37 @@ impl eframe::App for AppState {
                 }
             }
         });
+        // Load model viewer when an MDL file is selected
+        if let (Some(pack), Some(sel)) = (&self.pack, self.selected) {
+            let entry = &pack.entries[sel];
+            if entry.full_path.to_lowercase().ends_with(".mdl") {
+                if self.mdl_viewer_idx != Some(sel) {
+                    match pack.read_entry(entry).and_then(|d| mdl::parse_all_chunks(&d)) {
+                        Ok(chunks) => {
+                            self.mdl_viewer = Some(ModelViewer::new(chunks));
+                            self.mdl_viewer_idx = Some(sel);
+                        }
+                        Err(err) => {
+                            self.message = format!("Failed to load model: {err:#}");
+                            self.mdl_viewer = None;
+                            self.mdl_viewer_idx = None;
+                        }
+                    }
+                }
+            } else {
+                self.mdl_viewer = None;
+                self.mdl_viewer_idx = None;
+            }
+        } else {
+            self.mdl_viewer = None;
+            self.mdl_viewer_idx = None;
+        }
+
+        if let Some(viewer) = &mut self.mdl_viewer {
+            egui::Window::new("Model Viewer")
+                .anchor(Align2::RIGHT_BOTTOM, [0.0, 0.0])
+                .show(ctx, |ui| { viewer.ui(ui); });
+        }
     }
 }
 
