@@ -314,9 +314,13 @@ impl eframe::App for AppState {
         }
 
         if let Some(viewer) = &mut self.mdl_viewer {
-            egui::Window::new("Model Viewer")
+            egui::Area::new(egui::Id::new("mdl_viewer"))
                 .anchor(Align2::RIGHT_BOTTOM, [0.0, 0.0])
-                .show(ctx, |ui| { viewer.ui(ui); });
+                .show(ctx, |ui| {
+                    egui::Frame::window(ui.style()).show(ui, |ui| {
+                        viewer.ui(ui);
+                    });
+                });
         }
     }
 }
