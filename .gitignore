@@ -399,3 +399,5 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+main/target/CACHEDIR.TAG
+main/target/.rustc_info.json
