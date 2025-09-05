@@ -1,8 +1,6 @@
-use core::num;
-use std::{collections::{btree_map::Entry, BTreeMap}, fs, io::{Cursor, Read}, path::{Path, PathBuf}};
+use std::{collections::{BTreeMap}, fs, io::{Cursor, Read}, path::{Path, PathBuf}};
 use anyhow::{Context, Result};
 use eframe::egui::{self, Button};
-use egui::debug_text::print;
 use rfd::FileDialog;
 
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
@@ -31,19 +29,25 @@ struct GrpFile {
 
 impl GrpFile {
     fn parse(grp_path: &Path) -> Result<Self> {
+
         let file_data = fs::read(grp_path).with_context(|| "select the grp file")?;
-        // Check if true grp
-        if &file_data[0..4] != b"GRP2" {
+
+        if &file_data[0..4] != b"GRP2" {  // Check if true grp
             anyhow::bail!("Not a GRP2 file");
         }
+
         let header_size = get_u32(&file_data, 0x04)?;
         let file_count  = get_u32(&file_data, 0x14)?;
+
         println!("files: {file_count}");
+
         // Finds the begining of the file path/name and pushes it into the file name offset vector
+
         let mut file_name_offsets = Vec::with_capacity(file_count as usize);
         let mut off = 0x40;
         let mut debug_counter = 0;
         let mut debug_offset = 0;
+
         for _ in 0..file_count {
             debug_offset = get_u32(&file_data, off)?;
             file_name_offsets.push(debug_offset);
@@ -51,83 +55,120 @@ impl GrpFile {
             off += 4;
             debug_counter += 1;
         }
+
         // Finds the path/name of the file and pushes it into the file name vector
+
         let mut file_names = Vec::with_capacity(file_count as usize);
         for &name_offset in &file_name_offsets {
             let name_string = read_cstr(&file_data, name_offset as usize)
                 .with_context(|| format!("reading name at 0x{name_offset:08X}"))?;
             file_names.push(name_string);
         }
+
         // Crude way to locate the data index table but I haven't found a pointer to it yet
+
         let data_index_start = (*file_name_offsets.last().unwrap() as usize) + file_names.last().unwrap().len() + 5;
         println!("data index start: {data_index_start:08X}");
+
         // Locates the begining of each file
+
         let mut file_entry_data_begining: Vec<u32> = Vec::with_capacity(file_count as usize - 1);
         let mut _tmp_offset = data_index_start;
         for _ in 0..(file_count) {
             println!("{_tmp_offset:08X}");
+
             let file_loc = get_u32(&file_data, _tmp_offset)?; _tmp_offset += 12; //skips over the 4byte File location, 4byte file ID and the 4byte Common id
             file_entry_data_begining.push(file_loc);       
+
             println!("file at {file_loc:08X}");
         }
+
         //Create an entry vector
+
         let mut entries = Vec::with_capacity(file_count as usize);
-        let mut data_start = *file_entry_data_begining.first().unwrap();
+        let data_start = *file_entry_data_begining.first().unwrap();
         let mut i: usize  = 0;
+
         println!("Count:{file_count}");
         println!("Count Length:{0}", file_entry_data_begining.len());
+
         //Pushes all but the last entry into the entry vector
+
         while  i < (file_count as usize - 1) {
+
             println!("{i}");
-            let size = ((file_entry_data_begining[i + 1] - file_entry_data_begining[i]) as u64);
-            let start = (file_entry_data_begining[i] as u64);
+            let size = (file_entry_data_begining[i + 1] - file_entry_data_begining[i]) as u64;
+            let start = file_entry_data_begining[i] as u64;
             let full_path = file_names[i].clone();
             let magic = &file_data[start as usize..start as usize + 4.min(size as usize)];
             let compression = if magic == ZSTD_MAGIC { Compression::Zstd } else { Compression::Raw };
+
             entries.push(GrpEntry {
+
                 index: i as u32,
                 full_path,
                 start,
                 size,
                 compression,
+
             });
+
             i += 1;
+
         }
+
         let _temp_debug_file_data_len = file_data.len();
+
         println!("{_temp_debug_file_data_len:08X}");
 
-        let size = (((file_data.len() as u32) - file_entry_data_begining[i]) as u64);
-        let start = (file_entry_data_begining[i] as u64);
+        let size = ((file_data.len() as u32) - file_entry_data_begining[i]) as u64;
+        let start = file_entry_data_begining[i] as u64;
         let full_path = file_names[i].clone();
         let magic = &file_data[start as usize..start as usize +4.min(size as usize)];
         let compression = if magic == ZSTD_MAGIC {Compression::Zstd} else {Compression::Raw};
+
+
+
         entries.push(GrpEntry{
+
             index: i as u32,
             full_path, 
             start, 
             size, 
             compression
+
         });
 
 
         Ok(GrpFile {
+
             path: grp_path.to_path_buf(),
+
             file_data,
             header_size,
             file_count,
             data_start,
             entries,
+
         })
+
     }
+
     //Extracts the entry
+
     fn extract_entry(&self, entry: &GrpEntry, out_dir: &Path) -> Result<PathBuf> {
+
         let bytes = &self.file_data[entry.start as usize .. (entry.start + entry.size) as usize];
         let out_path = out_dir.join(&entry.full_path);
+
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent)?;
         }
+
         //Handles Compression
+
         match entry.compression {
+
             Compression::Zstd => {
                 let mut dec = zstd::stream::read::Decoder::new(Cursor::new(bytes))?;
                 let mut out = Vec::with_capacity(bytes.len() * 2);
@@ -138,20 +179,26 @@ impl GrpFile {
                 fs::write(&out_path, bytes)?;
             }
         }
+
         Ok(out_path)
     }
 }
+
 //Handles getting little-endian 4byte values
 fn get_u32(data: &[u8], off: usize) -> Result<u32> {
+
     if off + 4 > data.len() { anyhow::bail!("EOF reading u32 at 0x{off:08X}"); } //doubt this will ever happen but better safe than sorry
     Ok(u32::from_le_bytes(data[off..off+4].try_into().unwrap()))
+
 }
 
 fn read_cstr(buf: &[u8], off: usize) -> Result<String> {
+
     let mut end = off;
     while end < buf.len() && buf[end] != 0 { end += 1; }
     if end == buf.len() { anyhow::bail!("unterminated string at 0x{off:08X}"); }
     Ok(std::str::from_utf8(&buf[off..end])?.to_string())
+
 }
 
 
