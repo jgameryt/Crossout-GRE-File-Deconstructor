@@ -26,11 +26,18 @@ pub fn decode(tfd: &[u8], tfh: &[u8]) -> Result<TfdImage> {
     for y in 0..bh {
         for x in 0..bw {
             let off = (y * bw + x) * bpb;
-            let dest = (y * 4 * pitch) + (x * 4 * 4);
             let block = &tfd[off..off + bpb];
-            let dst_slice = &mut rgba[dest .. dest + pitch * 4];
-            // decode as BC3/DXT5
-            bcdec_rs::bc3(block, dst_slice, pitch);
+
+            // Decode into a temporary 4x4 RGBA block.
+            let mut tmp = [0u8; 4 * 4 * 4];
+            bcdec_rs::bc3(block, &mut tmp, 4 * 4);
+
+            // Copy each row of the decoded block into the destination image.
+            for row in 0..4 {
+                let dst = (y * 4 + row) * pitch + x * 4 * 4;
+                let src = row * 4 * 4;
+                rgba[dst..dst + 4 * 4].copy_from_slice(&tmp[src..src + 4 * 4]);
+            }
         }
     }
     Ok(TfdImage { width, height, rgba })
