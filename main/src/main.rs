@@ -424,7 +424,7 @@ impl eframe::App for AppState {
             egui::Area::new(egui::Id::new("tex_viewer"))
                 .interactable(true)
                 .order(egui::Order::Foreground)
-                .anchor(Align2::LEFT_BOTTOM, [0.0, 0.0])
+                .anchor(Align2::RIGHT_BOTTOM, [0.0, 0.0])
                 .show(ctx, |ui| {
                     egui::Frame::window(ui.style()).show(ui, |ui| {
                         tex.ui(ui);
