@@ -134,6 +134,7 @@ pub fn group_models(chunks: &[MdlChunk]) -> Vec<ModelGroup> {
     for (idx, ch) in chunks.iter().enumerate() {
         let key = ModelKey { fmt_tag: ch.fmt_tag, stride: ch.stride, codes: ch.codes };
         map.entry(key).or_default().push((idx, ch.vcount));
+        println!("Pushed!");
     }
     let mut groups: Vec<ModelGroup> = Vec::with_capacity(map.len());
     for (key, mut list) in map {
@@ -141,6 +142,7 @@ pub fn group_models(chunks: &[MdlChunk]) -> Vec<ModelGroup> {
         list.sort_by(|a,b| b.1.cmp(&a.1));
         let lods = list.into_iter().map(|(i,_)| i).collect();
         groups.push(ModelGroup { key, lods });
+        println!("LODED");
     }
     groups
 }

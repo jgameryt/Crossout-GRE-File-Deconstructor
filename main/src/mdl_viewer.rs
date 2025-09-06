@@ -83,8 +83,8 @@ impl ModelViewer {
     fn handle_input(&mut self, ui: &egui::Ui, resp: &Response) {
         if resp.dragged() {
             let d = resp.drag_delta();
-            self.yaw += d.x * 0.005;
-            self.pitch = (self.pitch + d.y * 0.005).clamp(-1.2, 1.2);
+            self.yaw -= d.x * 0.005;
+            self.pitch = (self.pitch - d.y * 0.005).clamp(-1.2, 1.2);
             ui.ctx().request_repaint();
         }
         if resp.hovered() {
