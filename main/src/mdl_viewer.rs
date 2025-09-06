@@ -55,6 +55,7 @@ impl ModelViewer {
         if self.selected_lod >= g.lods.len() {
             self.selected_lod = 0;
         }
+
         ComboBox::from_label("LOD")
             .selected_text(format!("LOD {}", self.selected_lod))
             .show_ui(ui, |ui| {
@@ -91,7 +92,7 @@ impl ModelViewer {
             let scroll = ui.input(|i| i.raw_scroll_delta.y);
             if scroll != 0.0 {
                 let dz = scroll * -0.002;
-                self.dist = (self.dist * (1.0 + dz)).clamp(0.5, 20.0);
+                self.dist = (self.dist * (1.00 + dz)).clamp(0.25, 40.0);
                 ui.ctx().request_repaint();
             }
         }
@@ -121,7 +122,7 @@ impl ModelViewer {
             let mut z = -p[0] * sy + p[2] * cy;
             let mut y = p[1] * cp - z * sp;
             z = p[1] * sp + z * cp;
-            let zc = z + self.dist * 2.0 + 1.0;
+            let zc = z + self.dist * 2.0;
             let f = 300.0 / zc.max(0.01);
             let sx = (w / 2) as f32 + x * f;
             let sy2 = (h / 2) as f32 - y * f;
