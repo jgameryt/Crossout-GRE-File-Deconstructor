@@ -21,6 +21,10 @@ impl TextureViewer {
         });
         tex.set(self.image.clone(), egui::TextureOptions::LINEAR);
         let size = Vec2::new(self.image.size[0] as f32, self.image.size[1] as f32);
-        ui.image((tex.id(), size));
+        let screen = ui.ctx().screen_rect().size();
+        let max = Vec2::new(screen.x * 0.5, screen.y * 0.5);
+        let scale = (max.x / size.x).min(max.y / size.y).min(1.0);
+        let display = size * scale;
+        ui.image((tex.id(), display));
     }
 }

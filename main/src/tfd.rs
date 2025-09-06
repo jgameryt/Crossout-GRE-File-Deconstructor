@@ -1,4 +1,5 @@
-use anyhow::{Result, bail, anyhow};
+use anyhow::{anyhow, Result};
+use std::{borrow::Cow, io::Cursor};
 
 /// Decoded texture data from a TFD/TFH pair.
 pub struct TfdImage {
@@ -9,26 +10,29 @@ pub struct TfdImage {
 
 /// Decode a TFD data stream with help from the accompanying TFH header.
 ///
-/// Only the top mip level of raw (uncompressed) BC textures is supported for
-/// now. Container-compressed TFDs (such as many normal maps) are detected and
-/// rejected.
+/// Supports raw BC1/BC3 textures and container-compressed streams (zstd
+/// compressed) which typically hold BC5 normal maps. Only the top mip level is
+/// expanded to RGBA pixels.
 pub fn decode(tfd: &[u8], tfh: &[u8]) -> Result<TfdImage> {
-    // Guard against container-compressed streams. Those are not multiples of 8
-    // bytes and require a different decoding path.
-    if tfd.len() % 8 != 0 {
-        bail!("Tile-compressed TFD; container compression not supported yet");
-    }
+    // Tile-compressed TFDs aren't multiples of 8 bytes. Those streams are
+    // zstd-compressed; decode them into a temporary buffer first.
+    let (raw, is_compressed) = if tfd.len() % 8 == 0 {
+        (Cow::Borrowed(tfd), false)
+    } else {
+        let data = zstd::stream::decode_all(Cursor::new(tfd))?;
+        (Cow::Owned(data), true)
+    };
 
     // Try to infer the top-level dimension, mip count and block footprint from
-    // the TFD size, optionally using the TFH's dimension hint as a tie breaker.
-    let (top, _mips, fp) = guess_from_tfd_len(tfd.len())
+    // the raw size, optionally using the TFH's dimension hint as a tie breaker.
+    let (top, _mips, fp) = guess_from_tfd_len(raw.len())
         .or_else(|| {
             let hint = tfh_dim_hint(tfh)?;
             [BcFootprint::Bc1_4, BcFootprint::Bc3_5_7]
                 .into_iter()
                 .find_map(|bpb| {
                     for mips in 1..10 {
-                        if sum_bc_bytes(hint, bpb as usize, mips) == tfd.len() {
+                        if sum_bc_bytes(hint, bpb as usize, mips) == raw.len() {
                             return Some((hint, mips, bpb));
                         }
                     }
@@ -39,9 +43,14 @@ pub fn decode(tfd: &[u8], tfh: &[u8]) -> Result<TfdImage> {
 
     let width = top;
     let height = top;
-    let rgba = match fp {
-        BcFootprint::Bc1_4 => decode_bc1_top_mip_to_rgba(tfd, width, height)?,
-        BcFootprint::Bc3_5_7 => decode_bc3_top_mip_to_rgba(tfd, width, height)?,
+    let rgba = if is_compressed {
+        // Compressed streams in the samples are BC5 normal maps.
+        decode_bc5_top_mip_to_rgba(&raw, width, height)?
+    } else {
+        match fp {
+            BcFootprint::Bc1_4 => decode_bc1_top_mip_to_rgba(&raw, width, height)?,
+            BcFootprint::Bc3_5_7 => decode_bc3_top_mip_to_rgba(&raw, width, height)?,
+        }
     };
 
     Ok(TfdImage { width, height, rgba })
@@ -101,6 +110,29 @@ fn decode_bc3_top_mip_to_rgba(src: &[u8], w: usize, h: usize) -> Result<Vec<u8>>
             let block = &src[off..off + bpb];
             let mut tmp = [0u8; 4 * 4 * 4];
             bcdec_rs::bc3(block, &mut tmp, 4 * 4);
+            for row in 0..4 {
+                let dst = (y * 4 + row) * pitch + x * 4 * 4;
+                let src_row = row * 4 * 4;
+                rgba[dst..dst + 4 * 4]
+                    .copy_from_slice(&tmp[src_row..src_row + 4 * 4]);
+            }
+        }
+    }
+    Ok(rgba)
+}
+
+fn decode_bc5_top_mip_to_rgba(src: &[u8], w: usize, h: usize) -> Result<Vec<u8>> {
+    let bw = (w + 3) / 4;
+    let bh = (h + 3) / 4;
+    let mut rgba = vec![0u8; w * h * 4];
+    let pitch = w * 4;
+    let bpb = 16usize;
+    for y in 0..bh {
+        for x in 0..bw {
+            let off = (y * bw + x) * bpb;
+            let block = &src[off..off + bpb];
+            let mut tmp = [0u8; 4 * 4 * 4];
+            bcdec_rs::bc5(block, &mut tmp, 4 * 4, true);
             for row in 0..4 {
                 let dst = (y * 4 + row) * pitch + x * 4 * 4;
                 let src_row = row * 4 * 4;
