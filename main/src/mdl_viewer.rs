@@ -1,4 +1,4 @@
-use egui::{self, ColorImage, ComboBox, TextureHandle, Vec2};
+use egui::{self, ColorImage, ComboBox, Response, TextureHandle, Vec2};
 use std::collections::BTreeSet;
 use crate::mdl::{MdlChunk, group_models, ModelGroup};
 
@@ -69,27 +69,31 @@ impl ModelViewer {
             });
 
         let size = Vec2::splat(512.0);
-        self.handle_input(ui);
         self.render_current();
         let tex = self
             .tex
             .get_or_insert_with(|| ui.ctx().load_texture("mdl_view", self.buf.clone(), egui::TextureOptions::LINEAR));
         tex.set(self.buf.clone(), egui::TextureOptions::LINEAR);
-        ui.image((tex.id(), size));
+        let resp = ui
+            .add(egui::Image::new((tex.id(), size)).sense(egui::Sense::drag()))
+            .on_hover_cursor(egui::CursorIcon::Grab);
+        self.handle_input(ui, &resp);
     }
 
-    fn handle_input(&mut self, ui: &mut egui::Ui) {
-        let resp = ui.interact(ui.max_rect(), ui.id().with("viewer_drag"), egui::Sense::drag());
+    fn handle_input(&mut self, ui: &egui::Ui, resp: &Response) {
         if resp.dragged() {
             let d = resp.drag_delta();
             self.yaw += d.x * 0.005;
             self.pitch = (self.pitch + d.y * 0.005).clamp(-1.2, 1.2);
             ui.ctx().request_repaint();
         }
-        if ui.input(|i| i.raw_scroll_delta.y != 0.0) {
-            let dz = ui.input(|i| i.raw_scroll_delta.y) * -0.002;
-            self.dist = (self.dist * (1.0 + dz)).clamp(0.5, 20.0);
-            ui.ctx().request_repaint();
+        if resp.hovered() {
+            let scroll = ui.input(|i| i.raw_scroll_delta.y);
+            if scroll != 0.0 {
+                let dz = scroll * -0.002;
+                self.dist = (self.dist * (1.0 + dz)).clamp(0.5, 20.0);
+                ui.ctx().request_repaint();
+            }
         }
     }
 
