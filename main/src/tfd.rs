@@ -43,13 +43,27 @@ pub fn decode(tfd: &[u8], tfh: &[u8]) -> Result<TfdImage> {
 
     let width = top;
     let height = top;
+
+    // TFD streams store mips from smallest to largest, so the top mip sits at
+    // the end of the buffer. Compute its size and slice the raw data accordingly
+    // before decoding.
+    let bpb = match fp {
+        BcFootprint::Bc1_4 => 8,
+        BcFootprint::Bc3_5_7 => 16,
+    };
+    let bw = (width + 3) / 4;
+    let bh = (height + 3) / 4;
+    let top_bytes = bw * bh * bpb;
+    let start = raw.len().saturating_sub(top_bytes);
+    let top_mip = &raw[start..start + top_bytes];
+
     let rgba = if is_compressed {
         // Compressed streams in the samples are BC5 normal maps.
-        decode_bc5_top_mip_to_rgba(&raw, width, height)?
+        decode_bc5_top_mip_to_rgba(top_mip, width, height)?
     } else {
         match fp {
-            BcFootprint::Bc1_4 => decode_bc1_top_mip_to_rgba(&raw, width, height)?,
-            BcFootprint::Bc3_5_7 => decode_bc3_top_mip_to_rgba(&raw, width, height)?,
+            BcFootprint::Bc1_4 => decode_bc1_top_mip_to_rgba(top_mip, width, height)?,
+            BcFootprint::Bc3_5_7 => decode_bc3_top_mip_to_rgba(top_mip, width, height)?,
         }
     };
 
