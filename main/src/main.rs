@@ -4,7 +4,10 @@ use eframe::egui::{self, Button};
 use rfd::FileDialog;
 mod mdl;
 mod mdl_viewer;
+mod tfd;
+mod tex_viewer;
 use mdl_viewer::ModelViewer;
+use tex_viewer::TextureViewer;
 use egui::Align2;
 
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
@@ -229,6 +232,8 @@ struct AppState {
     message: String,
     mdl_viewer: Option<ModelViewer>,
     mdl_viewer_idx: Option<usize>,
+    tex_viewer: Option<TextureViewer>,
+    tex_viewer_idx: Option<usize>,
 }
 
 #[derive(Default)]
@@ -360,6 +365,49 @@ impl eframe::App for AppState {
             self.mdl_viewer_idx = None;
         }
 
+        // Load texture viewer when a TFD/TFH file is selected
+        if let (Some(pack), Some(sel)) = (&self.pack, self.selected) {
+            let entry = &pack.entries[sel];
+            let lower = entry.full_path.to_lowercase();
+            if lower.ends_with(".tfd") || lower.ends_with(".tfh") {
+                if self.tex_viewer_idx != Some(sel) {
+                    let base = if let Some(b) = lower.strip_suffix(".tfd") {
+                        b
+                    } else {
+                        lower.strip_suffix(".tfh").unwrap()
+                    };
+                    let tfd_entry = pack.entries.iter().find(|e| e.full_path.to_lowercase() == format!("{base}.tfd"));
+                    let tfh_entry = pack.entries.iter().find(|e| e.full_path.to_lowercase() == format!("{base}.tfh"));
+                    if let (Some(tfd_e), Some(tfh_e)) = (tfd_entry, tfh_entry) {
+                        match (pack.read_entry(tfd_e), pack.read_entry(tfh_e)) {
+                            (Ok(tfd_data), Ok(tfh_data)) => match tfd::decode(&tfd_data, &tfh_data) {
+                                Ok(img) => {
+                                    self.tex_viewer = Some(TextureViewer::new(img));
+                                    self.tex_viewer_idx = Some(sel);
+                                }
+                                Err(err) => {
+                                    self.message = format!("Failed to load texture: {err:#}");
+                                    self.tex_viewer = None;
+                                    self.tex_viewer_idx = None;
+                                }
+                            },
+                            _ => {
+                                self.message = "Failed to read texture data".to_string();
+                                self.tex_viewer = None;
+                                self.tex_viewer_idx = None;
+                            }
+                        }
+                    }
+                }
+            } else {
+                self.tex_viewer = None;
+                self.tex_viewer_idx = None;
+            }
+        } else {
+            self.tex_viewer = None;
+            self.tex_viewer_idx = None;
+        }
+
         if let Some(viewer) = &mut self.mdl_viewer {
             egui::Area::new(egui::Id::new("mdl_viewer"))
                 .interactable(true)
@@ -368,6 +416,18 @@ impl eframe::App for AppState {
                 .show(ctx, |ui| {
                     egui::Frame::window(ui.style()).show(ui, |ui| {
                         viewer.ui(ui);
+                    });
+                });
+        }
+
+        if let Some(tex) = &mut self.tex_viewer {
+            egui::Area::new(egui::Id::new("tex_viewer"))
+                .interactable(true)
+                .order(egui::Order::Foreground)
+                .anchor(Align2::LEFT_BOTTOM, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    egui::Frame::window(ui.style()).show(ui, |ui| {
+                        tex.ui(ui);
                     });
                 });
         }
